@@ -1,16 +1,15 @@
-import { useReducer } from 'react'
+import { useReducer, useState } from 'react'
 import type { AppAction, AppState, ScannedPage, FilterPreset, Corners } from './types'
+import { Home } from './components/Home'
 import { Camera } from './components/Camera'
 import { EdgeDetector } from './components/EdgeDetector'
 import { FilterPanel } from './components/FilterPanel'
-import { PageStrip } from './components/PageStrip'
 import { ExportPanel } from './components/ExportPanel'
 import { detectCorners, imageDataFromDataUrl } from './utils/edgeDetection'
 import { usePerspective } from './hooks/usePerspective'
-import { useState } from 'react'
 
 const initial: AppState = {
-  step: 'camera',
+  step: 'home',
   pages: [],
   pending: null,
 }
@@ -18,7 +17,11 @@ const initial: AppState = {
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'CAPTURE':
-      return { ...state, step: 'edge', pending: { rawDataUrl: action.rawDataUrl, corners: action.corners, warpedDataUrl: null } }
+      return {
+        ...state,
+        step: 'edge',
+        pending: { rawDataUrl: action.rawDataUrl, corners: action.corners, warpedDataUrl: null },
+      }
 
     case 'UPDATE_CORNERS':
       if (!state.pending) return state
@@ -29,7 +32,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, step: 'filter', pending: { ...state.pending, warpedDataUrl: action.warpedDataUrl } }
 
     case 'ADD_FINAL_PAGE':
-      return { ...state, step: 'camera', pages: [...state.pages, action.page], pending: null }
+      return { ...state, step: 'home', pages: [...state.pages, action.page], pending: null }
 
     case 'DELETE_PAGE':
       return { ...state, pages: state.pages.filter(p => p.id !== action.id) }
@@ -51,6 +54,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return state
   }
 }
+
+const SCAN_STEPS = ['edge', 'filter'] as const
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initial)
@@ -74,71 +79,109 @@ export default function App() {
     dispatch({ type: 'CONFIRM_WARP', warpedDataUrl })
   }
 
-  function handleFilterDone(finalDataUrl: string, filter: FilterPreset, brightness: number, contrast: number) {
-    if (!state.pending) return
-    const page: ScannedPage = {
+  function buildPage(
+    finalDataUrl: string,
+    filter: FilterPreset,
+    brightness: number,
+    contrast: number,
+  ): ScannedPage {
+    return {
       id: `page-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      rawDataUrl: state.pending.rawDataUrl,
-      warpedDataUrl: state.pending.warpedDataUrl ?? '',
+      rawDataUrl: state.pending!.rawDataUrl,
+      warpedDataUrl: state.pending!.warpedDataUrl ?? '',
       finalDataUrl,
-      corners: state.pending.corners,
+      corners: state.pending!.corners,
       filter,
       brightness,
       contrast,
     }
-    dispatch({ type: 'ADD_FINAL_PAGE', page })
-    dispatch({ type: 'SET_STEP', step: 'pages' })
   }
 
-  function handleFilterAddPage(finalDataUrl: string, filter: FilterPreset, brightness: number, contrast: number) {
+  function handleFilterDone(
+    finalDataUrl: string,
+    filter: FilterPreset,
+    brightness: number,
+    contrast: number,
+  ) {
     if (!state.pending) return
-    const page: ScannedPage = {
-      id: `page-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      rawDataUrl: state.pending.rawDataUrl,
-      warpedDataUrl: state.pending.warpedDataUrl ?? '',
-      finalDataUrl,
-      corners: state.pending.corners,
-      filter,
-      brightness,
-      contrast,
-    }
-    dispatch({ type: 'ADD_FINAL_PAGE', page })
-    // ADD_FINAL_PAGE already resets step to 'camera'
+    dispatch({ type: 'ADD_FINAL_PAGE', page: buildPage(finalDataUrl, filter, brightness, contrast) })
+    // ADD_FINAL_PAGE → step: 'home' (shows the saved page immediately)
   }
+
+  function handleFilterAddPage(
+    finalDataUrl: string,
+    filter: FilterPreset,
+    brightness: number,
+    contrast: number,
+  ) {
+    if (!state.pending) return
+    dispatch({ type: 'ADD_FINAL_PAGE', page: buildPage(finalDataUrl, filter, brightness, contrast) })
+    // Go back to camera to add another
+    dispatch({ type: 'SET_STEP', step: 'camera' })
+  }
+
+  const inScanFlow = SCAN_STEPS.includes(state.step as (typeof SCAN_STEPS)[number])
 
   return (
-    <div className="w-full h-full flex flex-col bg-bg-primary overflow-hidden">
-      {/* Step indicator (top strip) */}
-      {state.step !== 'camera' && (
-        <div className="flex items-center justify-center gap-1.5 py-2 bg-bg-surface flex-shrink-0">
-          {(['camera', 'edge', 'filter', 'pages', 'export'] as const).map((s, i) => (
-            <div
-              key={s}
-              className={`h-1 rounded-full transition-all ${
-                s === state.step
-                  ? 'w-6 bg-accent'
-                  : i < (['camera', 'edge', 'filter', 'pages', 'export'] as const).indexOf(state.step)
-                  ? 'w-2 bg-accent/50'
-                  : 'w-2 bg-bg-elevated'
-              }`}
-            />
-          ))}
+    <div className="relative w-full h-full flex flex-col bg-bg-primary overflow-hidden">
+
+      {/* Scan progress bar — shown only mid-scan */}
+      {inScanFlow && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-bg-surface border-b border-bg-elevated flex-shrink-0">
+          <button
+            onClick={() => dispatch({ type: 'SET_STEP', step: 'home' })}
+            className="text-text-secondary mr-1"
+            aria-label="Cancel scan"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+            </svg>
+          </button>
+          <div className="flex gap-1.5 flex-1">
+            {SCAN_STEPS.map(s => (
+              <div
+                key={s}
+                className={`h-1 rounded-full flex-1 transition-all ${
+                  s === state.step ? 'bg-accent' : 'bg-bg-elevated'
+                }`}
+              />
+            ))}
+          </div>
+          <span className="text-text-secondary text-xs font-mono w-16 text-right">
+            {state.step === 'edge' ? 'ADJUST' : 'FILTER'}
+          </span>
         </div>
       )}
 
       {/* Main content */}
       <div className="flex-1 overflow-hidden fade-in" key={state.step}>
+
+        {/* Edge-detection loading overlay */}
         {detecting && (
-          <div className="absolute inset-0 z-50 bg-black/70 flex items-center justify-center">
+          <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center">
             <div className="bg-bg-surface rounded-2xl px-8 py-6 flex flex-col items-center gap-3">
               <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-              <p className="text-text-secondary text-sm font-mono">Detecting edges…</p>
+              <p className="text-white text-sm font-bold">Analyzing image…</p>
+              <p className="text-text-secondary text-xs font-mono">Detecting document edges</p>
             </div>
           </div>
         )}
 
+        {state.step === 'home' && (
+          <Home
+            pages={state.pages}
+            onScan={() => dispatch({ type: 'SET_STEP', step: 'camera' })}
+            onExport={() => dispatch({ type: 'SET_STEP', step: 'export' })}
+            onDelete={id => dispatch({ type: 'DELETE_PAGE', id })}
+            onMove={(from, to) => dispatch({ type: 'MOVE_PAGE', from, to })}
+          />
+        )}
+
         {state.step === 'camera' && (
-          <Camera onCapture={handleCapture} />
+          <Camera
+            onCapture={handleCapture}
+            onBack={() => dispatch({ type: 'SET_STEP', step: 'home' })}
+          />
         )}
 
         {state.step === 'edge' && state.pending && (
@@ -161,53 +204,14 @@ export default function App() {
           />
         )}
 
-        {state.step === 'pages' && (
-          <PageStrip
-            pages={state.pages}
-            onDelete={id => dispatch({ type: 'DELETE_PAGE', id })}
-            onMove={(from, to) => dispatch({ type: 'MOVE_PAGE', from, to })}
-            onScanMore={() => dispatch({ type: 'SET_STEP', step: 'camera' })}
-            onExport={() => dispatch({ type: 'SET_STEP', step: 'export' })}
-          />
-        )}
-
         {state.step === 'export' && (
           <ExportPanel
             pages={state.pages}
-            onBack={() => dispatch({ type: 'SET_STEP', step: 'pages' })}
+            onBack={() => dispatch({ type: 'SET_STEP', step: 'home' })}
             onReset={() => dispatch({ type: 'RESET' })}
           />
         )}
       </div>
-
-      {/* Bottom nav (visible on pages and export) */}
-      {(state.step === 'pages' || state.step === 'export') && (
-        <nav className="flex-shrink-0 flex bg-bg-surface border-t border-bg-elevated pb-safe">
-          {(
-            [
-              { step: 'camera', label: 'Scan', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z' },
-              { step: 'pages', label: 'Pages', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z' },
-              { step: 'export', label: 'Export', icon: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z' },
-            ] as const
-          ).map(({ step, label, icon }) => (
-            <button
-              key={step}
-              onClick={() => {
-                if (step === 'camera') dispatch({ type: 'SET_STEP', step: 'camera' })
-                else dispatch({ type: 'SET_STEP', step })
-              }}
-              className={`flex-1 flex flex-col items-center gap-1 py-3 ${
-                state.step === step ? 'text-accent' : 'text-text-secondary'
-              }`}
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                <path d={icon} />
-              </svg>
-              <span className="text-[10px] font-mono">{label}</span>
-            </button>
-          ))}
-        </nav>
-      )}
     </div>
   )
 }

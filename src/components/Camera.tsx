@@ -3,9 +3,10 @@ import { useCamera } from '../hooks/useCamera'
 
 interface Props {
   onCapture: (dataUrl: string) => void
+  onBack?: () => void
 }
 
-export function Camera({ onCapture }: Props) {
+export function Camera({ onCapture, onBack }: Props) {
   const { videoRef, error, ready, capture, flip } = useCamera()
   const [flashing, setFlashing] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -30,42 +31,66 @@ export function Camera({ onCapture }: Props) {
 
   if (error === 'permission') {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-6 px-8 text-center">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" className="text-text-secondary">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-4H7l5-8v4h4l-5 8z" fill="currentColor" />
-        </svg>
-        <div>
-          <p className="text-white font-bold text-lg mb-2">Camera access denied</p>
-          <p className="text-text-secondary text-sm">Allow camera access in your browser settings, or upload an image instead.</p>
+      <div className="flex flex-col h-full">
+        {onBack && (
+          <div className="px-4 pt-safe pt-4">
+            <button onClick={onBack} className="text-text-secondary flex items-center gap-2">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+              </svg>
+              <span className="text-sm">Back</span>
+            </button>
+          </div>
+        )}
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8 text-center">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" className="text-text-secondary">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15v-4H7l5-8v4h4l-5 8z" fill="currentColor" />
+          </svg>
+          <div>
+            <p className="text-white font-bold text-lg mb-2">Camera access denied</p>
+            <p className="text-text-secondary text-sm">Allow camera access in your browser settings, or upload an image instead.</p>
+          </div>
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="bg-accent text-bg-primary font-bold px-6 py-3 rounded-xl"
+          >
+            Upload image
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
         </div>
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="bg-accent text-bg-primary font-bold px-6 py-3 rounded-xl"
-        >
-          Upload image
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
       </div>
     )
   }
 
   if (error === 'notfound') {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-6 px-8 text-center">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" className="text-text-secondary">
-          <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" fill="currentColor" />
-        </svg>
-        <div>
-          <p className="text-white font-bold text-lg mb-2">No camera found</p>
-          <p className="text-text-secondary text-sm">Upload a photo to scan it.</p>
+      <div className="flex flex-col h-full">
+        {onBack && (
+          <div className="px-4 pt-safe pt-4">
+            <button onClick={onBack} className="text-text-secondary flex items-center gap-2">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+              </svg>
+              <span className="text-sm">Back</span>
+            </button>
+          </div>
+        )}
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8 text-center">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" className="text-text-secondary">
+            <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" fill="currentColor" />
+          </svg>
+          <div>
+            <p className="text-white font-bold text-lg mb-2">No camera found</p>
+            <p className="text-text-secondary text-sm">Upload a photo to scan it.</p>
+          </div>
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="bg-accent text-bg-primary font-bold px-6 py-3 rounded-xl"
+          >
+            Upload image
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
         </div>
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="bg-accent text-bg-primary font-bold px-6 py-3 rounded-xl"
-        >
-          Upload image
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
       </div>
     )
   }
@@ -117,7 +142,19 @@ export function Camera({ onCapture }: Props) {
 
       {/* Top controls */}
       <div className="absolute top-0 left-0 right-0 flex justify-between items-center p-4 pt-safe">
-        <div className="font-mono text-accent text-sm tracking-widest">SKANA</div>
+        {onBack ? (
+          <button
+            onClick={onBack}
+            className="w-11 h-11 rounded-full bg-black/50 flex items-center justify-center"
+            aria-label="Back"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+              <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+            </svg>
+          </button>
+        ) : (
+          <div className="font-mono text-accent text-sm tracking-widest">SKANA</div>
+        )}
         <button
           onClick={flip}
           className="w-11 h-11 rounded-full bg-black/50 flex items-center justify-center"

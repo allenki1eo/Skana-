@@ -23,7 +23,7 @@ export interface ScannedPage {
   contrast: number
 }
 
-export type Step = 'camera' | 'edge' | 'filter' | 'pages' | 'export'
+export type Step = 'home' | 'camera' | 'edge' | 'filter' | 'export'
 
 export interface PendingPage {
   rawDataUrl: string
