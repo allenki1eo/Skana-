@@ -55,28 +55,46 @@ function reducer(state: AppState, action: AppAction): AppState {
   }
 }
 
-const SCAN_STEPS = ['edge', 'filter'] as const
+type ProcessingStatus = null | 'detecting' | 'warping'
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initial)
-  const { warp, warping } = usePerspective()
-  const [detecting, setDetecting] = useState(false)
+  const { warp } = usePerspective()
+  const [processing, setProcessing] = useState<ProcessingStatus>(null)
 
+  // Auto-detect edges + warp in one step — skip EdgeDetector entirely
   async function handleCapture(rawDataUrl: string) {
-    setDetecting(true)
+    setProcessing('detecting')
+    let corners: Corners
     try {
       const imageData = await imageDataFromDataUrl(rawDataUrl)
-      const corners = detectCorners(imageData)
-      dispatch({ type: 'CAPTURE', rawDataUrl, corners })
+      corners = detectCorners(imageData)
     } finally {
-      setDetecting(false)
+      setProcessing(null)
+    }
+
+    // Store raw + corners first so EdgeDetector can use them if user hits Re-crop
+    dispatch({ type: 'CAPTURE', rawDataUrl, corners })
+
+    // Auto-warp immediately
+    setProcessing('warping')
+    try {
+      const warpedDataUrl = await warp(rawDataUrl, corners)
+      dispatch({ type: 'CONFIRM_WARP', warpedDataUrl })
+    } finally {
+      setProcessing(null)
     }
   }
 
   async function handleConfirmCorners(corners: Corners) {
     if (!state.pending) return
-    const warpedDataUrl = await warp(state.pending.rawDataUrl, corners)
-    dispatch({ type: 'CONFIRM_WARP', warpedDataUrl })
+    setProcessing('warping')
+    try {
+      const warpedDataUrl = await warp(state.pending.rawDataUrl, corners)
+      dispatch({ type: 'CONFIRM_WARP', warpedDataUrl })
+    } finally {
+      setProcessing(null)
+    }
   }
 
   function buildPage(
@@ -97,75 +115,40 @@ export default function App() {
     }
   }
 
-  function handleFilterDone(
-    finalDataUrl: string,
-    filter: FilterPreset,
-    brightness: number,
-    contrast: number,
-  ) {
+  function handleFilterDone(finalDataUrl: string, filter: FilterPreset, brightness: number, contrast: number) {
     if (!state.pending) return
     dispatch({ type: 'ADD_FINAL_PAGE', page: buildPage(finalDataUrl, filter, brightness, contrast) })
-    // ADD_FINAL_PAGE → step: 'home' (shows the saved page immediately)
   }
 
-  function handleFilterAddPage(
-    finalDataUrl: string,
-    filter: FilterPreset,
-    brightness: number,
-    contrast: number,
-  ) {
+  function handleFilterAddPage(finalDataUrl: string, filter: FilterPreset, brightness: number, contrast: number) {
     if (!state.pending) return
     dispatch({ type: 'ADD_FINAL_PAGE', page: buildPage(finalDataUrl, filter, brightness, contrast) })
-    // Go back to camera to add another
     dispatch({ type: 'SET_STEP', step: 'camera' })
   }
-
-  const inScanFlow = SCAN_STEPS.includes(state.step as (typeof SCAN_STEPS)[number])
 
   return (
     <div className="relative w-full h-full flex flex-col bg-bg-primary overflow-hidden">
 
-      {/* Scan progress bar — shown only mid-scan */}
-      {inScanFlow && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-bg-surface border-b border-bg-elevated flex-shrink-0">
-          <button
-            onClick={() => dispatch({ type: 'SET_STEP', step: 'home' })}
-            className="text-text-secondary mr-1"
-            aria-label="Cancel scan"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </svg>
-          </button>
-          <div className="flex gap-1.5 flex-1">
-            {SCAN_STEPS.map(s => (
-              <div
-                key={s}
-                className={`h-1 rounded-full flex-1 transition-all ${
-                  s === state.step ? 'bg-accent' : 'bg-bg-elevated'
-                }`}
-              />
-            ))}
+      {/* ── Full-screen processing overlay ── */}
+      {processing && (
+        <div className="absolute inset-0 z-50 bg-black/80 flex flex-col items-center justify-center gap-4">
+          <div className="relative w-16 h-16">
+            <div className="absolute inset-0 border-2 border-accent/20 rounded-full" />
+            <div className="absolute inset-0 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           </div>
-          <span className="text-text-secondary text-xs font-mono w-16 text-right">
-            {state.step === 'edge' ? 'ADJUST' : 'FILTER'}
-          </span>
+          <div className="text-center">
+            <p className="text-white font-bold text-base">
+              {processing === 'detecting' ? 'Detecting edges…' : 'Correcting perspective…'}
+            </p>
+            <p className="text-text-secondary text-sm font-mono mt-1">
+              {processing === 'detecting' ? 'Finding document corners' : 'Straightening your scan'}
+            </p>
+          </div>
         </div>
       )}
 
-      {/* Main content */}
+      {/* ── Step content ── */}
       <div className="flex-1 overflow-hidden fade-in" key={state.step}>
-
-        {/* Edge-detection loading overlay */}
-        {detecting && (
-          <div className="absolute inset-0 z-50 bg-black/80 flex items-center justify-center">
-            <div className="bg-bg-surface rounded-2xl px-8 py-6 flex flex-col items-center gap-3">
-              <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-              <p className="text-white text-sm font-bold">Analyzing image…</p>
-              <p className="text-text-secondary text-xs font-mono">Detecting document edges</p>
-            </div>
-          </div>
-        )}
 
         {state.step === 'home' && (
           <Home
@@ -184,13 +167,14 @@ export default function App() {
           />
         )}
 
+        {/* EdgeDetector only reachable via "Re-crop" from FilterPanel */}
         {state.step === 'edge' && state.pending && (
           <EdgeDetector
             rawDataUrl={state.pending.rawDataUrl}
             initialCorners={state.pending.corners}
             onConfirm={handleConfirmCorners}
-            onBack={() => dispatch({ type: 'SET_STEP', step: 'camera' })}
-            processing={warping}
+            onBack={() => dispatch({ type: 'SET_STEP', step: 'filter' })}
+            processing={processing === 'warping'}
           />
         )}
 
@@ -199,7 +183,7 @@ export default function App() {
             warpedDataUrl={state.pending.warpedDataUrl}
             onAddPage={handleFilterAddPage}
             onDone={handleFilterDone}
-            onBack={() => dispatch({ type: 'SET_STEP', step: 'edge' })}
+            onRecrop={() => dispatch({ type: 'SET_STEP', step: 'edge' })}
             pageCount={state.pages.length}
           />
         )}
